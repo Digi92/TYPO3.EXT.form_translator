@@ -56,11 +56,18 @@ class FormController extends ActionController
             $language->getTitle(),
         ]);
 
+        try {
+            $translationServiceEnabled = empty($this->extensionConfiguration->get('form_translator', 'libreTranslate/host')) === false;
+        } catch (\Exception $e) {
+            $translationServiceEnabled = false;
+        }
+
         $moduleTemplate = $this->initializeModuleTemplate($title);
         $moduleTemplate->assign('title', $title);
         $moduleTemplate->assign('items', $this->formService->getItems($persistenceIdentifier, $language));
         $moduleTemplate->assign('language', $language);
         $moduleTemplate->assign('persistenceIdentifier', $persistenceIdentifier);
+        $moduleTemplate->assign('translationServiceEnabled', $translationServiceEnabled);
 
         $buttonBar = $moduleTemplate->getDocHeaderComponent()->getButtonBar();
         $buttonBar->addButton(
