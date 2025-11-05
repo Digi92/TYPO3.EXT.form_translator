@@ -15,6 +15,7 @@ use TYPO3\CMS\Backend\Template\ModuleTemplate;
 use TYPO3\CMS\Backend\Template\ModuleTemplateFactory;
 use TYPO3\CMS\Core\Authentication\BackendUserAuthentication;
 use TYPO3\CMS\Core\Cache\Frontend\FrontendInterface;
+use TYPO3\CMS\Core\Configuration\ExtensionConfiguration;
 use TYPO3\CMS\Core\Imaging\Icon;
 use TYPO3\CMS\Core\Imaging\IconFactory;
 use TYPO3\CMS\Core\Localization\LanguageService;
@@ -32,6 +33,7 @@ class FormController extends ActionController
         protected ModuleTemplateFactory $moduleTemplateFactory,
         protected IconFactory $iconFactory,
         protected PageRenderer $pageRenderer,
+        protected ExtensionConfiguration $extensionConfiguration
     ) {}
 
     public function indexAction(): ResponseInterface
