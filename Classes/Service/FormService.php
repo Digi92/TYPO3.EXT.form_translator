@@ -36,6 +36,77 @@ class FormService
 
         $this->getTranslation($items, $persistenceIdentifier, $language);
 
+        $this->setPlaceholderWithSourceTranlations($items, $persistenceIdentifier, $language);
+
+        return $items;
+    }
+
+    protected function setPlaceholderWithSourceTranlations(ItemCollection &$items, string $persistenceIdentifier, Typo3Language $language): ItemCollection
+    {
+        $form = $this->parseForm($persistenceIdentifier);
+        $localLanguage = [];
+        // Change to load prototypes.standard.formElementsDefinition.Form.renderingOptions.translation.translationFiles
+        $translationFiles = ['EXT:custom_form_ext/Resources/Private/Language/locallang.xlf'];
+        foreach ($translationFiles as $translationFile) {
+            $localLanguage = array_replace_recursive($localLanguage, $this->localizationFactory->getParsedData($translationFile, $language->getTypo3Language()));
+
+            // Default language should be en and if the transaltion file has not set the en locale in the file name all transaltions a given as "default" array key and not en
+            if (isset($localLanguage['default'], $localLanguage['en']) &&
+                is_array($localLanguage['default']) &&
+                count($localLanguage['default']) > 0 &&
+                is_array($localLanguage['en']) &&
+                count($localLanguage['en']) <= 0
+            ) {
+                $localLanguage['en'] = $localLanguage['default'];
+            }
+        }
+
+        if (array_key_exists($language->getTypo3Language(), $localLanguage) &&
+            is_array($localLanguage[$language->getTypo3Language()]) &&
+            isset($form['identifier'])
+        ) {
+            foreach ($items as $item) {
+                if (empty($item->getTarget()) === false) {
+                    continue;
+                }
+
+                $lang = $language->getTypo3Language();
+                $identifier = $item->getIdentifier();
+                $globalLabel = str_replace($form['identifier'] . '.', '', $identifier);
+
+                // 1) Translation with the form identifier as prefix
+                if (isset($localLanguage[$lang][$identifier][0]['target'])) {
+                    $item->setPlaceholder($localLanguage[$lang][$identifier][0]['target']);
+                    continue;
+                }
+
+                // 2) Global translation with the "Form" instead the identifier
+                $renderingOptionsIdentifier = str_replace($form['identifier'] . '.', 'Form.', $identifier);
+                if (isset($localLanguage[$lang][$renderingOptionsIdentifier][0]['target'])) {
+                    $item->setPlaceholder($localLanguage[$lang][$renderingOptionsIdentifier][0]['target']);
+                    continue;
+                }
+
+                // 3) Global translation without the form identifier as prefix
+                if (isset($localLanguage[$lang][$globalLabel][0]['target'])) {
+                    $item->setPlaceholder($localLanguage[$lang][$globalLabel][0]['target']);
+                    continue;
+                }
+
+                // 4) Fallback: normalize to "validation.error.<id>" (e.g. from "...validation.error.message-1.1347992453")
+                if (preg_match('~\bvalidation\.error\..*?\.(\d+)$~', $globalLabel, $m)) {
+                    $normalizedKey = 'validation.error.' . $m[1];
+
+                    if (isset($localLanguage[$lang][$normalizedKey][0]['target'])) {
+                        $item->setPlaceholder($localLanguage[$lang][$normalizedKey][0]['target']);
+                        continue;
+                    }
+                }
+
+                // ToDo: Find a way to handle "form-identifier.element.salutation-1.properties.prependOptionLabel" where the translation is stored by field type like this "element.SingleSelect.properties.prependOptionLabel"
+            }
+        }
+
         return $items;
     }
 

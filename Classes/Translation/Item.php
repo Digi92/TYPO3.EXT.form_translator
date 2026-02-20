@@ -10,6 +10,7 @@ final class Item
     private string $source = '';
     private string $target = '';
     private string $original = '';
+    private string $placeholder = '';
 
     public function __construct(string $identifier)
     {
@@ -52,5 +53,15 @@ final class Item
     public function getOriginal(): string
     {
         return $this->original;
+    }
+
+    public function setPlaceholder(string $placeholder): void
+    {
+        $this->placeholder = $placeholder;
+    }
+
+    public function getPlaceholder(): string
+    {
+        return $this->placeholder;
     }
 }
