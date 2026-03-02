@@ -36,78 +36,174 @@ class FormService
 
         $this->getTranslation($items, $persistenceIdentifier, $language);
 
-        $this->setPlaceholderWithSourceTranlations($items, $persistenceIdentifier, $language);
+        $this->setPlaceholderWithSourceTranslations($items, $persistenceIdentifier, $language);
 
         return $items;
     }
 
-    protected function setPlaceholderWithSourceTranlations(ItemCollection &$items, string $persistenceIdentifier, Typo3Language $language): ItemCollection
+    /**
+     * Set placeholder texts on items that have no translation yet.
+     * Loads the global translation files from the form framework's prototype configuration
+     * and resolves matching translations following the TYPO3 lookup order.
+     * This allows editors to see the original/default translation as a reference
+     * while working on their own translations.
+     *
+     * @param ItemCollection $items Collection of translation items to enrich with placeholders
+     * @param string $persistenceIdentifier Form persistence identifier used to load the form definition
+     * @param Typo3Language $language Target language to resolve translations for
+     * @return ItemCollection The enriched item collection
+     */
+    protected function setPlaceholderWithSourceTranslations(ItemCollection &$items, string $persistenceIdentifier, Typo3Language $language): ItemCollection
     {
         $form = $this->parseForm($persistenceIdentifier);
-        $localLanguage = [];
-        // Change to load prototypes.standard.formElementsDefinition.Form.renderingOptions.translation.translationFiles
-        $translationFiles = ['EXT:custom_form_ext/Resources/Private/Language/locallang.xlf'];
-        foreach ($translationFiles as $translationFile) {
-            $localLanguage = array_replace_recursive($localLanguage, $this->localizationFactory->getParsedData($translationFile, $language->getTypo3Language()));
-
-            // Default language should be en and if the transaltion file has not set the en locale in the file name all transaltions a given as "default" array key and not en
-            if (isset($localLanguage['default'], $localLanguage['en']) &&
-                is_array($localLanguage['default']) &&
-                count($localLanguage['default']) > 0 &&
-                is_array($localLanguage['en']) &&
-                count($localLanguage['en']) <= 0
-            ) {
-                $localLanguage['en'] = $localLanguage['default'];
-            }
+        if (!isset($form['identifier'])) {
+            return $items;
         }
 
-        if (array_key_exists($language->getTypo3Language(), $localLanguage) &&
-            is_array($localLanguage[$language->getTypo3Language()]) &&
-            isset($form['identifier'])
+        $formId = $form['identifier'];
+        $lang = $language->getTypo3Language();
+
+
+        $translationFiles = [];
+        $localLanguage = [];
+
+        // Try to load global form translations
+        try {
+            /** @var FormConfigurationManagerInterface $formConfigurationManager */
+            $formConfigurationManager = GeneralUtility::makeInstance(FormConfigurationManagerInterface::class);
+            $yamlConfiguration = $formConfigurationManager->getConfiguration('YamlSettings', 'form');
+            $translationFiles = $yamlConfiguration['prototypes']['standard']['formElementsDefinition']['Form']['renderingOptions']['translation']['translationFiles'] ?? [];
+        } catch (\Throwable) {
+        }
+
+        foreach ($translationFiles as $translationFile) {
+            $localLanguage = array_replace_recursive(
+                $localLanguage,
+                $this->localizationFactory->getParsedData($translationFile, $lang)
+            );
+        }
+
+        // Default language should be en and if the transaltion file has not set the en locale in the file name all transaltions a given as "default" array key and not en
+        if (!empty($localLanguage['default']) &&
+            empty($localLanguage['en'])
         ) {
-            foreach ($items as $item) {
-                if (empty($item->getTarget()) === false) {
-                    continue;
+            $localLanguage['en'] = $localLanguage['default'];
+        }
+
+        $translations = $localLanguage[$lang] ?? [];
+        if ($translations === []) {
+            return $items;
+        }
+
+        $typeMap = $this->buildElementTypeMap($form);
+
+        // --- Resolve placeholders ---
+        //
+        // TYPO3 lookup order (first match wins):
+        //
+        // Element properties:
+        //   1. contactForm.element.LastName.properties.label       (form-specific)
+        //   2. Form.element.LastName.properties.label              (renderingOptions)
+        //   3. element.LastName.properties.label                   (global by name)
+        //   4. contactForm.element.Text.properties.label           (form-specific by type)
+        //   5. element.Text.properties.label                       (global by type)
+        //
+        // Validators:
+        //   1. contactForm.validation.error.LastName.1221560910    (form + element)
+        //   2. validation.error.LastName.1221560910                (element only)
+        //   3. contactForm.validation.error.1221560910             (form + code only)
+        //   4. validation.error.1221560910                         (code only)
+        //
+        // Finishers:
+        //   1. contactForm.finisher.EmailToSender.subject          (form-specific)
+        //   2. finisher.EmailToSender.subject                      (global)
+        foreach ($items as $item) {
+            if ($item->getTarget() !== '' && $item->getTarget() !== null) {
+                continue;
+            }
+
+            $id = $item->getIdentifier();
+            $global = str_replace($formId . '.', '', $id);
+
+            // Lookup order per category – first match wins.
+            // See TYPO3 docs: Frontend rendering > Translation of form element properties
+            $candidates = [];
+
+            // Element properties, e.g. "element.LastName.properties.label"
+            // Only matches when the name after "element." is an actual form element.
+            if (preg_match('~^element\.([^.]+)\.(.+)$~', $global, $m) && isset($typeMap[$m[1]])) {
+                $elementName = $m[1];
+                $property = $m[2];
+                $elementType = $typeMap[$elementName] ?? null;
+
+                $candidates[] = $formId . '.element.' . $elementName . '.' . $property;  // contactForm.element.LastName.properties.label
+                $candidates[] = 'Form.element.' . $elementName . '.' . $property;        // Form.element.LastName.properties.label
+                $candidates[] = 'element.' . $elementName . '.' . $property;             // element.LastName.properties.label
+                if ($elementType !== null) {
+                    $candidates[] = $formId . '.element.' . $elementType . '.' . $property;  // contactForm.element.Text.properties.label
+                    $candidates[] = 'element.' . $elementType . '.' . $property;             // element.Text.properties.label
                 }
 
-                $lang = $language->getTypo3Language();
-                $identifier = $item->getIdentifier();
-                $globalLabel = str_replace($form['identifier'] . '.', '', $identifier);
+                // Validators, e.g. "validation.error.LastName.1221560910"
+            } elseif (preg_match('~^validation\.error\.([^.]+)\.(\d+)$~', $global, $m)) {
+                $elementName = $m[1];
+                $errorCode = $m[2];
 
-                // 1) Translation with the form identifier as prefix
-                if (isset($localLanguage[$lang][$identifier][0]['target'])) {
-                    $item->setPlaceholder($localLanguage[$lang][$identifier][0]['target']);
-                    continue;
+                $candidates[] = $formId . '.validation.error.' . $elementName . '.' . $errorCode;  // contactForm.validation.error.LastName.1221560910
+                $candidates[] = 'validation.error.' . $elementName . '.' . $errorCode;              // validation.error.LastName.1221560910
+                $candidates[] = $formId . '.validation.error.' . $errorCode;                        // contactForm.validation.error.1221560910
+                $candidates[] = 'validation.error.' . $errorCode;                                   // validation.error.1221560910
+
+                // Finishers, renderingOptions, or any other key
+            } else {
+                $candidates[] = $id;                                          // contactForm.finisher.EmailToSender.subject
+                $candidates[] = str_replace($formId . '.', 'Form.', $id);    // Form.finisher.EmailToSender.subject
+                $candidates[] = $global;                                      // finisher.EmailToSender.subject
+            }
+
+            // First match wins
+            foreach ($candidates as $key) {
+                $value = $translations[$key][0]['target'] ?? null;
+                if (is_string($value) && $value !== '') {
+                    $item->setPlaceholder($value);
+                    break;
                 }
-
-                // 2) Global translation with the "Form" instead the identifier
-                $renderingOptionsIdentifier = str_replace($form['identifier'] . '.', 'Form.', $identifier);
-                if (isset($localLanguage[$lang][$renderingOptionsIdentifier][0]['target'])) {
-                    $item->setPlaceholder($localLanguage[$lang][$renderingOptionsIdentifier][0]['target']);
-                    continue;
-                }
-
-                // 3) Global translation without the form identifier as prefix
-                if (isset($localLanguage[$lang][$globalLabel][0]['target'])) {
-                    $item->setPlaceholder($localLanguage[$lang][$globalLabel][0]['target']);
-                    continue;
-                }
-
-                // 4) Fallback: normalize to "validation.error.<id>" (e.g. from "...validation.error.message-1.1347992453")
-                if (preg_match('~\bvalidation\.error\..*?\.(\d+)$~', $globalLabel, $m)) {
-                    $normalizedKey = 'validation.error.' . $m[1];
-
-                    if (isset($localLanguage[$lang][$normalizedKey][0]['target'])) {
-                        $item->setPlaceholder($localLanguage[$lang][$normalizedKey][0]['target']);
-                        continue;
-                    }
-                }
-
-                // ToDo: Find a way to handle "form-identifier.element.salutation-1.properties.prependOptionLabel" where the translation is stored by field type like this "element.SingleSelect.properties.prependOptionLabel"
             }
         }
 
         return $items;
+    }
+
+    /**
+     * Build a flat lookup map from the nested form definition: elementIdentifier → elementType.
+     *
+     * Example:
+     *   | elementIdentifier | elementType  |
+     *   |-------------------|--------------|
+     *   | LastName          | Text         |
+     *   | gender-1          | SingleSelect |
+     *   | message-1         | Textarea     |
+     *   | consent-1         | Checkbox     |
+     *
+     * @return array<string, string>
+     */
+    private function buildElementTypeMap(array $form): array
+    {
+        $map = [];
+
+        $queue = $form['renderables'] ?? [];
+
+        while ($queue !== []) {
+            $el = array_shift($queue);
+            if (isset($el['identifier'], $el['type'])) {
+                $map[$el['identifier']] = $el['type'];
+            }
+            foreach ($el['renderables'] ?? [] as $child) {
+                $queue[] = $child;
+            }
+        }
+
+        return $map;
     }
 
     public function listForms(): array

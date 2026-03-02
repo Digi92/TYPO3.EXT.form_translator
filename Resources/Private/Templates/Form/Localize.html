@@ -36,6 +36,7 @@
                         name="items[{i.index}][target]"
                         class="form-control"
                         value="{f:if(condition: '{language.typo3Language} == \'default\'', then: item.source, else: item.target)}"
+                        placeholder="{item.placeholder}"
                     />
                      <small class="form-text text-muted">{item.identifier}</small>
                   </td>
