@@ -55,12 +55,17 @@ class FormController extends ActionController
             $this->formService->getTitle($persistenceIdentifier),
             $language->getTitle(),
         ]);
+        $items = $this->formService->getItems($persistenceIdentifier, $language);
 
         $moduleTemplate = $this->initializeModuleTemplate($title);
         $moduleTemplate->assign('title', $title);
-        $moduleTemplate->assign('items', $this->formService->getItems($persistenceIdentifier, $language));
+        $moduleTemplate->assign('items', $items);
         $moduleTemplate->assign('language', $language);
         $moduleTemplate->assign('persistenceIdentifier', $persistenceIdentifier);
+        $moduleTemplate->assign('countNotTranslatedFields', count(array_filter(
+            iterator_to_array($items),
+            static fn($item) => !empty($item->getPlaceholder()) || (!empty($item->getSource()) && !empty($item->getTarget()))
+        )));
 
         $buttonBar = $moduleTemplate->getDocHeaderComponent()->getButtonBar();
         $buttonBar->addButton(

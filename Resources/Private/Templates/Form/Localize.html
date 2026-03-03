@@ -7,7 +7,7 @@
    <f:layout name="Module" />
 
    <f:section name="Content">
-        <h1>{title}</h1>
+        <h1>{title} {countNotTranslatedFields}/{items -> f:count()}</h1>
         <f:form id="LocalizationForm" action="save" arguments="{persistenceIdentifier: persistenceIdentifier, language: language.typo3Language}" method="post" enctype="multipart/form-data">
          <table>
             <thead>
