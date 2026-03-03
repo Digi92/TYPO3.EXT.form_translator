@@ -34,7 +34,7 @@
                      <f:form.textarea
                         id="Target{i.index}"
                         name="items[{i.index}][target]"
-                        class="form-control"
+                        class="form-control {f:if(condition: '{item.placeholder} || ({item.source} && {item.target})', else: 'border-danger bg-danger-subtle')}"
                         value="{f:if(condition: '{language.typo3Language} == \'default\'', then: item.source, else: item.target)}"
                         placeholder="{item.placeholder}"
                     />
